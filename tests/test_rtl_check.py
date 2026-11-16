@@ -237,7 +237,9 @@ class RtlCheckIntegrationTests(unittest.TestCase):
                 "endmodule\n"
             )
             (root / "rtl.f").write_text("simple.sv\n")
-            env = {**os.environ, "PATH": f"{fake_bin}:/usr/bin:/bin"}
+            # PATH holds only the yosys wrapper: distro packages put verilator and
+            # iverilog in /usr/bin, so adding system dirs would defeat the test.
+            env = {**os.environ, "PATH": str(fake_bin)}
             r = subprocess.run(
                 [sys.executable, str(CHECK_CLI), "--top", "simple", "-f", str(root / "rtl.f"),
                  "--out-dir", str(root / "out")],
