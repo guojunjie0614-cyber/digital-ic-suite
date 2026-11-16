@@ -242,25 +242,29 @@ def _execute_yosys(yosys: str, read_cmd: list[str], hier_cmd: list[str], top: st
     gate_ltp = out / "gate_ltp.rpt"
     scc_rpt = out / "scc_loops.rpt"
 
+    # Yosys runs inside `out` and writes outputs by bare file name. Older Yosys
+    # releases (e.g. 0.52) keep the quotes of `tee -o "path"` as part of the
+    # file name, so quoted absolute paths break there; bare names also stay
+    # safe when the output directory contains spaces. Inputs are absolute.
     lines = [" ".join(read_cmd)]
     if apply_params:
         lines.extend(f"chparam -set {k} {v} {top}" for k, v in params.items())
     lines.extend([
         " ".join(hier_cmd),
         "proc",
-        f"write_json {_ys_quote(str(pre_netlist))}",
+        f"write_json {pre_netlist.name}",
         "opt; memory -nomap; opt; check",
-        f"write_json {_ys_quote(str(netlist))}",
+        f"write_json {netlist.name}",
         "flatten; opt",
-        f"tee -o {_ys_quote(str(scc_rpt))} scc",
-        f"tee -o {_ys_quote(str(word_ltp))} ltp -noff",
+        f"tee -o {scc_rpt.name} scc",
+        f"tee -o {word_ltp.name} ltp -noff",
         "techmap; opt -fast",
-        f"write_json {_ys_quote(str(mapped_netlist))}",
-        f"tee -o {_ys_quote(str(gate_ltp))} ltp -noff",
+        f"write_json {mapped_netlist.name}",
+        f"tee -o {gate_ltp.name} ltp -noff",
     ])
     script.write_text("\n".join(lines) + "\n")
 
-    rc = run_cmd([yosys, "-s", str(script)], log_path, cwd=project)
+    rc = run_cmd([yosys, "-s", str(script)], log_path, cwd=out)
     if rc != 0 or not netlist.is_file():
         return rc, None
 
