@@ -355,11 +355,31 @@ def run_yosys(inputs: Filelist, resolved_sources: list[Path], top: str, params: 
         return run_with_sv2v("sv2v-fallback")
 
     res = {"status": "fail", "mode": "native", "returncode": rc, "version": ys_ver}
+    yosys_error = first_yosys_error(out / "yosys.log")
+    if yosys_error:
+        res["error"] = yosys_error
     if err_msg:
         res["analysis_error"] = err_msg
-    elif sv2v_mode == "auto" and not sv2v_exe:
+    elif sv2v_mode == "auto" and not sv2v_exe and is_parse_error(yosys_error):
         res["hint"] = "native Yosys SV parse failed; installing sv2v enables automatic SV lowering fallback"
     return res, None
+
+
+def first_yosys_error(log_path: Path) -> str | None:
+    """Return the first Yosys ERROR line (plus its continuation) so failures explain themselves."""
+    if not log_path.is_file():
+        return None
+    lines = log_path.read_text(errors="replace").splitlines()
+    for idx, line in enumerate(lines):
+        if "ERROR:" in line:
+            extra = [ln.strip() for ln in lines[idx + 1: idx + 3] if ln.strip() and not ln.startswith("End of script")]
+            return " ".join([line.strip(), *extra])[:400]
+    return None
+
+
+def is_parse_error(message: str | None) -> bool:
+    text = (message or "").lower()
+    return any(key in text for key in ("syntax error", "parse", "unexpected", "not supported"))
 
 
 def config_diff_notes(prev_summary: dict, cur_config: dict) -> list[str]:
@@ -408,6 +428,8 @@ def print_human_report(summary: dict, out_dir: Path) -> None:
     if qor is None:
         for reason in summary["gate"]["failures"]:
             print(f"  FAIL: {reason}")
+        if y_info.get("error"):
+            print(f"  YOSYS ({y_info.get('version') or 'unknown version'}): {y_info['error']}")
         if y_info.get("hint"):
             print(f"  HINT: {y_info['hint']}")
         print(f"Logs: {out_dir}")
