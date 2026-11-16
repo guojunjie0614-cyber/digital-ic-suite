@@ -39,13 +39,13 @@
 ### 安装为 Agent Skill
 
 ```bash
-npx skills add guojunjie0614/digital-ic-suite
+npx skills add guojunjie0614-cyber/digital-ic-suite
 ```
 
 也可以直接克隆并软链接到你使用的编程 Agent 技能目录：
 
 ```bash
-git clone https://github.com/guojunjie0614/digital-ic-suite.git
+git clone https://github.com/guojunjie0614-cyber/digital-ic-suite.git
 mkdir -p ~/.claude/skills ~/.codex/skills ~/.gemini/config/skills ~/.agents/skills
 
 # 按实际使用的客户端选择对应命令：

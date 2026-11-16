@@ -39,13 +39,13 @@ Instead of writing unconstrained Verilog and hoping synthesis succeeds, it force
 ### Install as an Agent Skill
 
 ```bash
-npx skills add guojunjie0614/digital-ic-suite
+npx skills add guojunjie0614-cyber/digital-ic-suite
 ```
 
 Or clone and symlink into your agent's skill directory:
 
 ```bash
-git clone https://github.com/guojunjie0614/digital-ic-suite.git
+git clone https://github.com/guojunjie0614-cyber/digital-ic-suite.git
 mkdir -p ~/.claude/skills ~/.codex/skills ~/.gemini/config/skills ~/.agents/skills
 
 # Link to whichever coding agent(s) you use:
