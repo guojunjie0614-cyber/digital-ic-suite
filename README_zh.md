@@ -20,6 +20,12 @@
 - **开源形式化证明与可复用基础单元**
   - [`templates/prim_cells.sv`](templates/prim_cells.sv) 提供可直接拷贝使用的基础模块与内联 SVA 宏：`prim_flop_2sync`、`prim_rst_sync`、`prim_icg`、`prim_skid_buf`、`prim_sram_1rw_wrap` 以及 `ASSERT*`。
   - [`references/dv-and-formal.md`](references/dv-and-formal.md) 提供了开箱即用的 `sby`（SymbiYosys）与 `yosys-smtbmc` 单时钟 BMC + k-Induction + 非空洞 `cover()` 验证模板。
+- **RTL 可读性是硬性要求**
+  - 明确要求 Agent 不许为了快牺牲可读性和注释：每个模块都要有文件头（功能、Latency/II、时钟复位、接口协议、数值格式、参数范围）、按接口分组并逐个注释的端口、分段横幅、标号的流水级，以及每个不直观硬件决策旁的“为什么”注释。
+  - 规范与评审清单见 [`references/rtl-readability-and-comments.md`](references/rtl-readability-and-comments.md)，可直接复制的零告警骨架见 [`templates/rtl_module_template.sv`](templates/rtl_module_template.sv)。
+- **首次连接 EDA 服务器的初始化向导（`eda_runner/scripts/eda_setup.py`）**
+  - 只需把 SSH 地址告诉 Agent 一次：向导会检查免密登录、从远端登录环境读出 License 变量、自动找到已安装的 DC/PT/FM/LC/VCS/Verdi/SpyGlass/Xcelium/Genus/Innovus/Questa，并保存为本机私有的单服务器配置 `~/.config/digital-ic-suite/tools.d/<名字>.yaml`（权限 600）。
+  - 从不询问或保存密码，也不会改写你手写的 `tools.yaml`。
 - **解耦的商业 EDA 远端执行器（`eda_runner/`）**
   - 所有服务器 SSH 别名、License 地址与工具安装路径全部外置到 `~/.config/digital-ic-suite/tools.yaml` 或项目 `./.eda_tools.yaml`（模板见 [`templates/eda_tools.example.yaml`](templates/eda_tools.example.yaml)），绝不进入仓库。
   - 远端命令统一通过 `bash -c` 安全包装传输，完美兼容 IC 服务器常见的 `tcsh`/`csh`/`dash` 默认登录 Shell，同时保持 `tar` 同步数据流无损。
@@ -117,7 +123,27 @@ QoR Budget Check: PASS (7 rules)
 
 ## 商业 EDA 签核配置（`eda_runner/`）
 
-当需要接入远端服务器运行 DC 综合、PT 时序、SpyGlass CDC、VCS 仿真或 Formality LEC 时：
+### 第一次使用：让 Agent 帮你接入服务器
+
+直接告诉 Agent 服务器的 SSH 地址（例如“连 `designer@eda-server`，端口 2222，经跳板机 `designer@bastion`”），它会替你运行初始化向导；也可以自己运行：
+
+```bash
+python3 eda_runner/scripts/eda_setup.py init --target lab \
+  --host designer@eda-server --port 2222 --jump designer@bastion --default
+```
+
+向导会依次：
+
+1. 检查 `ssh -o BatchMode=yes` 能否免密登录。必须使用密钥登录；只支持密码的服务器请先自己运行一次 `ssh-copy-id <host>`。连不上时以 `rc=20` 退出并提示怎么修。
+2. 从远端登录环境读取 License 变量（`SNPSLMD_LICENSE_FILE`、`CDS_LIC_FILE`、`MGLS_LICENSE_FILE`、`LM_LICENSE_FILE`）和 `PATH`。
+3. 在常见安装目录（`/opt`、`/eda`、`/tools`、`/cad` 等，可用 `--add-search-root` 追加）里查找工具，优先用你 `PATH` 里的那份，否则选最新版本。
+4. 保存为 `~/.config/digital-ic-suite/tools.d/lab.yaml`（权限 600），并打印汇总：哪些工具找到了、缺哪个 License、哪些工具有多个版本。需要指定时用 `--license synopsys=27000@lic-host` 或 `--tool syn-dc=/path/bin/dc_shell` 加 `--force` 重跑。
+
+用 `eda_setup.py list` 查看、`eda_setup.py remove --target lab` 删除已接入的服务器。每台服务器的工具路径和 License 各自独立，多台服务器可以并存。
+
+### 手动配置
+
+也可以手写配置：
 
 1. 将 [`templates/eda_tools.example.yaml`](templates/eda_tools.example.yaml) 复制到仓库之外的配置目录：
 
@@ -126,14 +152,17 @@ QoR Budget Check: PASS (7 rules)
    cp templates/eda_tools.example.yaml ~/.config/digital-ic-suite/tools.yaml
    ```
 
-2. 在 `~/.config/digital-ic-suite/tools.yaml`（或项目根目录 `.eda_tools.yaml`）中填入你的 SSH 主机别名（或跳板机 `command` 包装脚本）、License 服务器（如 `SNPSLMD_LICENSE_FILE`）与工具安装路径（仓库 `.gitignore` 已默认屏蔽 `.eda_tools.yaml` 和 `tools.yaml`）。
-3. 单次 SSH 预检连接、环境变量、License 连通性与工具探针：
+2. 在 `~/.config/digital-ic-suite/tools.yaml`（或项目根目录 `.eda_tools.yaml`）中填入你的 SSH 主机别名（或跳板机 `command` 包装脚本）、License 服务器（如 `SNPSLMD_LICENSE_FILE`）与工具安装路径（仓库 `.gitignore` 已默认屏蔽 `.eda_tools.yaml`、`tools.yaml` 和 `tools.d/`）。
+
+### 运行作业
+
+1. 单次 SSH 预检连接、环境变量、License 连通性与工具探针：
 
    ```bash
    python3 eda_runner/scripts/eda_preflight.py syn-dc --level probe
    ```
 
-4. 配合 [`templates/syn_dc.tcl`](templates/syn_dc.tcl) 或 [`templates/lec_fm.tcl`](templates/lec_fm.tcl) 运行独立原子作业：
+2. 配合 [`templates/syn_dc.tcl`](templates/syn_dc.tcl) 或 [`templates/lec_fm.tcl`](templates/lec_fm.tcl) 运行独立原子作业：
 
    ```bash
    bash eda_runner/scripts/eda_job.sh init my_block --reuse
@@ -158,16 +187,19 @@ digital-ic-suite/
 │   ├── netlist_qor.py                # 层级化网表资源、扇出与死逻辑分析
 │   └── qor_budget.py                 # 结构预算与历史趋势比对
 ├── eda_runner/scripts/
-│   ├── eda_env.py                    # 外部 tools.yaml 加载与跨 Shell 封装
+│   ├── eda_setup.py                  # 首次接入服务器的初始化向导（tools.d/<名字>.yaml）
+│   ├── eda_env.py                    # 配置加载（tools.yaml + tools.d/）与跨 Shell 封装
 │   ├── eda_preflight.py              # 单会话 SSH/License/工具可用性预检
 │   ├── eda_exec.sh                   # 单会话远端命令执行器
 │   └── eda_job.sh                    # 原子化 init/sync/run/fetch 作业管理
 ├── references/
+│   ├── rtl-readability-and-comments.md  # 文件头、注释、排版规则与可读性评审清单
 │   ├── sv-coding-guidelines.md       # 可综合 SV 子集与跨工具陷阱手册
 │   ├── microarch-datapath-sram.md    # 拍数/II 调度、定点量化、SRAM 与预算说明
 │   ├── cdc-sta-lec-signoff.md        # CDC/RDC、SpyGlass 排查、SDC、4 层 PPA 与 LEC
 │   └── dv-and-formal.md              # 自适应验证（Verilator/cocotb/Icarus）与形式化
 ├── templates/
+│   ├── rtl_module_template.sv        # 注释完整、零告警的模块骨架
 │   ├── prim_cells.sv                 # 硅片级基础模块与 ASSERT* 宏
 │   ├── qor_budget.yaml               # 结构 QoR 预算配置模板
 │   ├── eda_tools.example.yaml        # 商业 EDA 外部环境配置模板
@@ -185,7 +217,7 @@ digital-ic-suite/
 python3 -B -m unittest discover -s tests -v
 ```
 
-测试覆盖：工具缺失降级、`flist_parser`（`-f` 与 `-F` 语义及惰性 `-y`）、Latch 分离、死逻辑/触发器剪枝守卫、`sv2v` 复杂 package 自动降阶（当本机安装 `sv2v` 时）、无 `PyYAML` 零依赖启动、`tcsh`/`csh` 远端登录 Shell 兼容、Markdown 链接有效性以及敏感信息防泄漏自检。
+测试覆盖：工具缺失降级、`flist_parser`（`-f` 与 `-F` 语义及惰性 `-y`）、Latch 分离、死逻辑/触发器剪枝守卫、`sv2v` 复杂 package 自动降阶（当本机安装 `sv2v` 时）、无 `PyYAML` 零依赖启动、`tcsh`/`csh` 远端登录 Shell 兼容、服务器初始化向导（工具发现、私有文件权限、手写配置不被改动、多服务器互不干扰、连不上时的报错）、可读性模板与示例零告警、Markdown 链接有效性以及敏感信息防泄漏自检。
 
 ---
 

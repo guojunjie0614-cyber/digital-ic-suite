@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Load external commercial-EDA configuration and emit safe shell bindings."""
+"""Load external commercial-EDA configuration and emit safe shell bindings.
+
+Configuration sources (merged):
+  1. Main file: --config, $EDA_TOOLS_CONFIG, ./.eda_tools.yaml, or
+     ~/.config/digital-ic-suite/tools.yaml (first one that exists wins).
+  2. Drop-in directory next to the main file (tools.yaml -> tools.d/*.yaml).
+     Each drop-in holds one onboarded server and is written by eda_setup.py,
+     so hand-written main files are never rewritten.
+
+A target may carry its own `profiles` and `tools` mappings. They override the
+global sections of the same name for that target only, which lets two servers
+use different install paths and license servers.
+"""
 
 from __future__ import annotations
 
@@ -13,11 +25,26 @@ import sys
 from pathlib import Path
 
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-TEMPLATE_HINT = "Copy templates/eda_tools.example.yaml to ~/.config/digital-ic-suite/tools.yaml"
+TARGET_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+DEFAULT_CONFIG = Path.home() / ".config" / "digital-ic-suite" / "tools.yaml"
+TEMPLATE_HINT = (
+    "Onboard a server with: python3 eda_runner/scripts/eda_setup.py init --host <user@host> "
+    "(or copy templates/eda_tools.example.yaml to ~/.config/digital-ic-suite/tools.yaml)"
+)
 
 
 class ConfigError(ValueError):
     pass
+
+
+def dropin_dir(main: Path) -> Path:
+    """tools.yaml -> tools.d ; .eda_tools.yaml -> .eda_tools.d"""
+    return main.with_suffix(".d")
+
+
+def config_exists(main: Path) -> bool:
+    drop = dropin_dir(main)
+    return main.is_file() or (drop.is_dir() and any(drop.glob("*.yaml")))
 
 
 def resolve_config_path(explicit: Path | None = None) -> Path:
@@ -27,18 +54,15 @@ def resolve_config_path(explicit: Path | None = None) -> Path:
     elif env_cfg := os.environ.get("EDA_TOOLS_CONFIG"):
         candidates.append(Path(env_cfg).expanduser())
     else:
-        candidates.extend([
-            Path.cwd() / ".eda_tools.yaml",
-            Path.home() / ".config" / "digital-ic-suite" / "tools.yaml",
-        ])
+        candidates.extend([Path.cwd() / ".eda_tools.yaml", DEFAULT_CONFIG])
     for candidate in candidates:
-        if candidate.is_file():
+        if config_exists(candidate):
             return candidate.resolve()
     searched = ", ".join(str(p) for p in candidates)
     raise ConfigError(f"no EDA tools config found (checked: {searched}). {TEMPLATE_HINT}")
 
 
-def _require_yaml():
+def require_yaml():
     try:
         import yaml
         return yaml
@@ -54,21 +78,60 @@ def wrap_remote_bash(script: str) -> str:
     return f"bash -c 'eval \"$(printf %s {b64} | (base64 -d 2>/dev/null || base64 -D))\"'"
 
 
-def load(path: Path) -> dict:
-    yaml = _require_yaml()
+def _read_yaml(path: Path):
+    yaml = require_yaml()
     try:
-        data = yaml.safe_load(path.read_text())
+        return yaml.safe_load(path.read_text())
     except (OSError, yaml.YAMLError) as exc:
         raise ConfigError(f"cannot load {path}: {exc}") from exc
+
+
+def read_dropin(path: Path) -> tuple[str, dict]:
+    data = _read_yaml(path)
+    if not isinstance(data, dict) or not isinstance(data.get("target"), dict):
+        raise ConfigError(f"{path} must contain 'name' and a 'target' mapping")
+    name = str(data.get("name") or path.stem)
+    if not TARGET_NAME.fullmatch(name):
+        raise ConfigError(f"{path}: invalid target name {name!r}")
+    return name, data["target"]
+
+
+def load(path: Path, *, allow_empty: bool = False) -> dict:
+    """Load the main file plus drop-ins and validate every target and tool."""
+    data = _read_yaml(path) if path.is_file() else {}
+    if data is None:
+        data = {}
     if not isinstance(data, dict):
         raise ConfigError(f"{path} must contain a YAML mapping")
+    data = dict(data)
     for section in ("targets", "profiles", "tools"):
-        if not isinstance(data.get(section), dict) or not data[section]:
-            raise ConfigError(f"{path} section '{section}' must be a non-empty mapping")
+        value = data.get(section)
+        if value is None:
+            data[section] = {}
+        elif not isinstance(value, dict):
+            raise ConfigError(f"{path} section '{section}' must be a mapping")
+        else:
+            data[section] = dict(value)
+
+    sources = {str(name): str(path) for name in data["targets"]}
+    drop = dropin_dir(path)
+    for dropin in sorted(drop.glob("*.yaml")) if drop.is_dir() else []:
+        name, tcfg = read_dropin(dropin)
+        if name in data["targets"]:
+            raise ConfigError(f"target {name!r} in {dropin} duplicates the one in {sources[name]}")
+        data["targets"][name] = tcfg
+        sources[name] = str(dropin)
+    data["_sources"] = sources
+
+    if not data["targets"]:
+        if allow_empty:
+            return data
+        raise ConfigError(f"{path}: no targets configured. {TEMPLATE_HINT}")
     for tname in data["targets"]:
         target(data, str(tname))
-    for tool_name in data["tools"]:
-        tool(data, str(tool_name))
+        tools, _ = effective_sections(data, str(tname))
+        for tool_name in tools:
+            tool(data, str(tool_name), str(tname))
     return data
 
 
@@ -108,6 +171,18 @@ def target(data: dict, name: str | None = None) -> tuple[str, dict, list[str]]:
     return str(chosen), cfg, argv
 
 
+def effective_sections(data: dict, target_name: str) -> tuple[dict, dict]:
+    """Return (tools, profiles) for a target: global entries overlaid by target-local ones."""
+    tcfg = data["targets"][target_name]
+    merged = []
+    for section in ("tools", "profiles"):
+        local = tcfg.get(section) or {}
+        if not isinstance(local, dict):
+            raise ConfigError(f"targets.{target_name}.{section} must be a mapping")
+        merged.append({**data[section], **local})
+    return merged[0], merged[1]
+
+
 def check_transport_executable(argv: list[str]) -> None:
     exe = argv[0]
     if "/" in exe:
@@ -117,17 +192,19 @@ def check_transport_executable(argv: list[str]) -> None:
         raise ConfigError(f"transport executable not found in PATH: {exe}")
 
 
-def tool(data: dict, name: str) -> tuple[dict, dict]:
-    cfg = data["tools"].get(name)
+def tool(data: dict, name: str, target_name: str | None = None) -> tuple[dict, dict]:
+    tname = target(data, target_name)[0]
+    tools, profiles = effective_sections(data, tname)
+    cfg = tools.get(name)
     if not isinstance(cfg, dict):
-        available = ", ".join(sorted(map(str, data["tools"])))
-        raise ConfigError(f"unknown EDA tool {name!r} (available: {available})")
+        available = ", ".join(sorted(map(str, tools)))
+        raise ConfigError(f"unknown EDA tool {name!r} on target {tname!r} (available: {available})")
     for field in ("profile", "root", "bin", "probe"):
         if cfg.get(field) in (None, ""):
-            raise ConfigError(f"missing tools.{name}.{field}")
-    profile = data["profiles"].get(str(cfg["profile"]))
+            raise ConfigError(f"missing tools.{name}.{field} (target {tname!r})")
+    profile = profiles.get(str(cfg["profile"]))
     if not isinstance(profile, dict):
-        raise ConfigError(f"tools.{name}.profile {cfg['profile']!r} is undefined")
+        raise ConfigError(f"tools.{name}.profile {cfg['profile']!r} is undefined (target {tname!r})")
     environment(profile, cfg)
     children = cfg.get("child_executables", [])
     if not isinstance(children, list) or any(not str(item or "").strip() for item in children):
@@ -194,7 +271,7 @@ def license_shell_expr(profile: dict) -> tuple[str, str] | None:
 
 def shell_bundle(data: dict, tool_name: str, target_name: str | None = None) -> dict[str, str]:
     tname, tcfg, argv = target(data, target_name)
-    cfg, profile = tool(data, tool_name)
+    cfg, profile = tool(data, tool_name, tname)
     home = os.environ.get("EDA_REMOTE_HOME", str(tcfg["remote_home"]))
     locale = os.environ.get("EDA_REMOTE_LANG", str(tcfg.get("locale") or "en_US.UTF-8"))
     lc_all = os.environ.get("EDA_REMOTE_LC_ALL", locale)
@@ -241,7 +318,7 @@ def shell_bundle(data: dict, tool_name: str, target_name: str | None = None) -> 
 def main() -> int:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--config", type=Path, default=argparse.SUPPRESS, help="explicit tools.yaml path")
-    common.add_argument("--target", default=argparse.SUPPRESS, help="named target from tools.yaml")
+    common.add_argument("--target", default=argparse.SUPPRESS, help="named target from tools.yaml or tools.d/")
     parser = argparse.ArgumentParser(description="Query commercial EDA environment configuration.", parents=[common])
     parser.set_defaults(config=None, target=None)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -257,9 +334,11 @@ def main() -> int:
         if args.command == "validate":
             tname, _, argv = target(data, args.target)
             check_transport_executable(argv)
-            print(f"EDA CONFIG PASS: {cfg_path} (target={tname}, tools={len(data['tools'])})")
+            tools, _ = effective_sections(data, tname)
+            print(f"EDA CONFIG PASS: {cfg_path} (target={tname}, tools={len(tools)})")
         elif args.command == "list-tools":
-            print("\n".join(data["tools"]))
+            tools, _ = effective_sections(data, target(data, args.target)[0])
+            print("\n".join(tools))
         elif args.command == "list-targets":
             print("\n".join(data["targets"]))
         elif args.command == "target-vars":

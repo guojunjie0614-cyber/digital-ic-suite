@@ -122,7 +122,7 @@ def main() -> int:
         data = load(cfg_path)
         tname, _, argv = target(data, args.target)
         check_transport_executable(argv)
-        tcfg, profile = tool(data, args.tool)
+        tcfg, profile = tool(data, args.tool, tname)
         bundle = shell_bundle(data, args.tool, tname)
     except ConfigError as exc:
         print(f"EDA PREFLIGHT CONFIG ERROR: {exc}", file=sys.stderr)

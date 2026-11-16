@@ -296,6 +296,33 @@ class RtlCheckIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(r_icg.returncode, 0, r_icg.stdout + r_icg.stderr)
 
+    def test_readability_template_and_example_are_lint_clean(self) -> None:
+        """The RTL style references must themselves pass -Wall lint and the QoR gate."""
+        cases = (
+            ("rtl_module_template", ROOT / "templates" / "rtl_module_template.sv"),
+            ("tiny_alu_pipe", ROOT / "examples" / "tiny_alu_pipe" / "tiny_alu_pipe.sv"),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for top, src in cases:
+                lint = subprocess.run(
+                    ["verilator", "--lint-only", "-Wall", "-Wno-DECLFILENAME", "--top-module", top,
+                     str(PRIM_CELLS_SV), str(src)],
+                    text=True, capture_output=True,
+                )
+                self.assertEqual(lint.returncode, 0, f"{top}:\n{lint.stdout}{lint.stderr}")
+                flist = root / f"{top}.f"
+                flist.write_text(f'"{PRIM_CELLS_SV}"\n"{src}"\n')
+                r = subprocess.run(
+                    [sys.executable, str(CHECK_CLI), "--top", top, "-f", str(flist),
+                     "--out-dir", str(root / f"out_{top}"), "--style", "off"],
+                    text=True, capture_output=True,
+                )
+                self.assertEqual(r.returncode, 0, f"{top}:\n{r.stdout}{r.stderr}")
+                qor = json.loads((root / f"out_{top}" / "qor_summary.json").read_text())["qor"]
+                self.assertEqual(qor["latch_bits"], 0)
+                self.assertEqual(qor["stuck_output_bits"], 0)
+
 
 class UnitSafetyTests(unittest.TestCase):
     def test_probe_toolchain_degrades_cleanly_with_zero_binaries(self) -> None:

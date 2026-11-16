@@ -15,7 +15,7 @@ Build front-end RTL that synthesizes cleanly and closes timing by construction,
 verified through an **environment-adaptive local inner loop** before touching heavy
 commercial signoff.
 
-## Three Core Laws
+## Four Core Laws
 
 1. **Think Hardware Before Code**: Before writing `module`, know where data comes
    from, where it goes, what happens each cycle, how backpressure flows, how many
@@ -28,6 +28,13 @@ commercial signoff.
 3. **Interfaces & Boundaries Are Law**: Lock `valid/ready` stability, sideband/error
    semantics, explicit bit-widths/rounding/saturation, and CDC/RDC topology first.
    Internal logic can be refactored cheaply; broken interfaces infect the whole chip.
+4. **Readable RTL Is Part of Done**: Never trade readability or comments for speed,
+   even when asked to be quick. Every module ships with a header (function,
+   `Latency`/`II`, clocks/resets, interfaces, numerics, parameter ranges), grouped and
+   commented ports, banner-separated sections, labeled pipeline stages, and a
+   *why*-comment at every non-obvious hardware decision. If time is short, cut scope,
+   not documentation. Start from [`templates/rtl_module_template.sv`](templates/rtl_module_template.sv)
+   and pass the checklist in [`references/rtl-readability-and-comments.md`](references/rtl-readability-and-comments.md).
 
 ## Adaptive Execution Loop (Probe First, Use Fastest Available Path)
 
@@ -42,6 +49,35 @@ whatever is installed and degrade gracefully when something is missing:
 ```bash
 python3 "<suite>/rtl_check/scripts/probe_toolchain.py"
 ```
+
+### Step 0b: First-Run EDA Server Onboarding (When Commercial Tools Are Needed)
+
+Trigger when the probe prints `Commercial EDA : not configured`, the needed tool or
+server is missing from the listed targets, or the user asks to connect a server.
+
+1. **Ask once, in one message**, for: the SSH address (`user@host` or a
+   `~/.ssh/config` alias), the port if not 22, a jump host if any, and a short name
+   for the server. Optionally: license server (`port@host`) and non-standard install
+   directories. **Never ask for or store passwords**: login must be key-based. For a
+   password-only server, ask the user to run `ssh-copy-id <host>` themselves first.
+2. **Run the onboarding wizard** with the answers:
+   ```bash
+   python3 "<suite>/eda_runner/scripts/eda_setup.py" init --target <name> \
+     --host <user@host> [--port N] [--jump user@bastion] [--add-search-root /dir] --default
+   ```
+   It verifies non-interactive SSH, reads the remote login environment (license
+   variables, `PATH`), searches standard install roots for DC/PT/FM/LC/VCS/Verdi/
+   SpyGlass/Xcelium/Genus/Innovus/Questa, and saves
+   `~/.config/digital-ic-suite/tools.d/<name>.yaml` (mode 600). A hand-written
+   `tools.yaml` is never rewritten; only its `default_target:` line changes (backup first).
+3. **Report the summary** to the user. Ask a follow-up only when a license was not
+   found or several installed versions compete; then rerun with
+   `--license synopsys=27000@lic-host`, `--tool syn-dc=/path/bin/dc_shell`, and `--force`.
+4. **Verify** before the first real job:
+   `python3 "<suite>/eda_runner/scripts/eda_preflight.py" <tool> --target <name> --level probe`.
+   `eda_setup.py list` shows configured servers; `eda_setup.py remove --target <name>` forgets one.
+
+`rc=20` from the wizard means SSH/auth is blocked: report the printed guidance and stop.
 
 ### 1. Adaptive Local Inner Loop (Run on Every Meaningful RTL Edit)
 
@@ -83,8 +119,9 @@ Escalate when local structure & simulation are clean and mapped QoR, multi-corne
 SpyGlass CDC, VCS/Verdi debug, or Formality LEC is needed.
 
 - Server targets, SSH aliases, licenses, and vendor paths live **outside** this skill
-  in `~/.config/digital-ic-suite/tools.yaml` or project `./.eda_tools.yaml`
-  (template: `templates/eda_tools.example.yaml`).
+  in `~/.config/digital-ic-suite/tools.yaml` plus onboarded servers in
+  `~/.config/digital-ic-suite/tools.d/` (or project `./.eda_tools.yaml`). Create them
+  with Step 0b; the schema is shown in `templates/eda_tools.example.yaml`.
 - Execute in a single-SSH-session preflight + job flow:
   ```bash
   EDA_SCRIPTS="<suite>/eda_runner/scripts"
@@ -112,7 +149,8 @@ SpyGlass CDC, VCS/Verdi debug, or Formality LEC is needed.
     when cutting long `ready` backpressure paths.
   - Reuse silicon-safe building blocks from [`templates/prim_cells.sv`](templates/prim_cells.sv)
     (`ASSERT*`, `prim_flop_2sync`, `prim_rst_sync`, `prim_icg`, `prim_skid_buf`, `prim_sram_1rw_wrap`).
-  - Document module pipeline latency (`Latency: N cycles`) in the module header.
+  - Document module pipeline latency (`Latency: N cycles`) in the module header,
+    following the full header layout of [`templates/rtl_module_template.sv`](templates/rtl_module_template.sv).
 
 ## Domain References & Templates
 
@@ -120,8 +158,9 @@ Read the matching reference before non-trivial work in that area:
 
 | Task or Engineering Question | Reference / Template |
 |---|---|
+| Writing or reviewing any RTL: header block, port/section comments, why-comments, naming, layout, comment tool-safety, readability checklist | [`references/rtl-readability-and-comments.md`](references/rtl-readability-and-comments.md), [`templates/rtl_module_template.sv`](templates/rtl_module_template.sv) |
 | Synthesizable SV subset, 7 cross-tool traps, X-safety, AXI/CSR `W1C`, `valid/ready` + Skid Buffer, FSMs, adder trees/mux cost, SRAM/FIFO, ICG/DFT | [`references/sv-coding-guidelines.md`](references/sv-coding-guidelines.md), [`templates/prim_cells.sv`](templates/prim_cells.sv) |
 | Microarchitecture trade-offs, cycle/II scheduling, fixed-point quantization/saturation, Foundry SRAM wrapper, QoR budgets | [`references/microarch-datapath-sram.md`](references/microarch-datapath-sram.md), [`templates/qor_budget.yaml`](templates/qor_budget.yaml) |
 | Clocks/resets, CDC/RDC mechanisms, SpyGlass 7-step triage & waivers, SDC authoring, 4-layer PPA triage, DC & Formality LEC templates | [`references/cdc-sta-lec-signoff.md`](references/cdc-sta-lec-signoff.md), [`templates/syn_dc.tcl`](templates/syn_dc.tcl), [`templates/lec_fm.tcl`](templates/lec_fm.tcl) |
 | Adaptive verification (`Verilator`/`iverilog`/`cocotb`), `sby` & `yosys-smtbmc` formal proofs, coverage, X-prop, Handoff/ECO gates | [`references/dv-and-formal.md`](references/dv-and-formal.md) |
-| Commercial EDA environment configuration schema (`ssh` vs. helper command targets, FlexLM/file licenses) | [`templates/eda_tools.example.yaml`](templates/eda_tools.example.yaml) |
+| Connecting a new EDA server (Step 0b wizard), per-server tool/license overrides, config schema (`ssh` vs. helper command targets, FlexLM/file licenses) | `eda_runner/scripts/eda_setup.py --help`, [`templates/eda_tools.example.yaml`](templates/eda_tools.example.yaml) |

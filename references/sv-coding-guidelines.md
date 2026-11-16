@@ -63,7 +63,7 @@ Rules distilled from lowRISC/OpenTitan style and Sutherland/Cummings/Mills synth
 
 ## 4. Naming, Clocks & Resets
 
-- **Signal naming**: `[src2dst_]<name>_<attr>[_n]`: `_n` active-low, `_nxt`/`_d` next-state, `_q`/`_p1` registered, `_pulse` 1-cycle strobe. One module per file (`<module_name>.sv`), with `Latency: N cycles` in the module header.
+- **Signal naming**: `[src2dst_]<name>_<attr>[_n]`: `_i`/`_o` ports, `_n` active-low, `_nxt`/`_d` next-state, `_q`/`_p1` registered, `_sN` pipeline stage N (`prod_s1_q`), `_pulse` 1-cycle strobe; `ALL_CAPS` parameters/localparams. One module per file (`<module_name>.sv`). Header block, port comments, and section layout follow [`rtl-readability-and-comments.md`](rtl-readability-and-comments.md).
 - **Clocks**: Never gate or mux clocks in combinational `assign` logic (`clk & en`). Instantiate `prim_icg` (`templates/prim_cells.sv`) or foundry `icg_cell` / `clk_mux_cell` with `test_en_i`.
 - **Resets**:
   - Control/FSM/valid/pointers: async-assert, sync-deassert via `prim_rst_sync` (with DFT `test_mode_i` bypass!).

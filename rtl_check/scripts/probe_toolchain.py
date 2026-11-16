@@ -66,12 +66,17 @@ def _probe_remote_config() -> dict:
 
         cfg_path = eda_env.resolve_config_path()
         data = eda_env.load(cfg_path)
+        try:
+            default_target = eda_env.target(data)[0]
+            tools, _ = eda_env.effective_sections(data, default_target)
+        except eda_env.ConfigError:
+            default_target, tools = None, data.get("tools", {})
         return {
             "configured": True,
             "config_path": str(cfg_path),
-            "default_target": data.get("default_target"),
+            "default_target": default_target,
             "targets": sorted(map(str, data.get("targets", {}))),
-            "tools": sorted(map(str, data.get("tools", {}))),
+            "tools": sorted(map(str, tools)),
         }
     except Exception as exc:
         return {
@@ -187,10 +192,12 @@ def print_human(inv: dict) -> None:
     if remote["configured"]:
         print(
             f"Commercial EDA : {remote['config_path']} "
-            f"(default={remote['default_target']}, tools={', '.join(remote['tools'])})"
+            f"(default={remote['default_target']}, targets={', '.join(remote['targets'])}, "
+            f"tools={', '.join(remote['tools'])})"
         )
     else:
-        print("Commercial EDA : not configured")
+        print("Commercial EDA : not configured "
+              f"(onboard a server: python3 {EDA_RUNNER_SCRIPTS / 'eda_setup.py'} init --host <user@host>)")
     print("\nRecommended Execution Paths:")
     for k, v in inv["recommended_strategy"].items():
         print(f"  - {k:<17}: {v}")
