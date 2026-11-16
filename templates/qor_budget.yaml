@@ -1,0 +1,34 @@
+# Optional machine-checkable structural & QoR budget for `pre_synth_check.py --budget`.
+# Use only when enforcing explicit operator, memory, fanout, or logic-depth limits.
+design: my_block
+
+resources:
+  # mul_budget:
+  #   operation: multiply          # multiply | add_sub | compare | shift | divide_mod | mux
+  #   expected: 4                  # expected, min, and/or max
+  #   a_width: 8
+  #   b_width: 8
+
+storage:
+  # data_ram:
+  #   implementation: sram         # memory | ram | sram | regfile
+  #   width: 32
+  #   depth: 256
+  #   banks: 1
+  #   read_ports: 1
+  #   write_ports: 1
+  #   read_latency: 1
+
+limits:
+  latch_bits_max: 0                # default 0: flag accidental combinational latches
+  comb_loops_max: 0                # default 0: fail on combinational SCC loops
+  # stuck_output_bits_max: 0       # flag top outputs folded to constant 0/1 (dead logic)
+  # max_fanout_max: 256            # warn/gate high non-clock fanout nets
+  # ff_bits_max: 512
+  # gate_depth_max: 20             # mapped generic gate topological levels
+  # word_depth_max: 6              # word-level operator hops
+  # mux_data_bits_max: 256
+  # memory_bits_max: 8192
+  # regression_pct_max:            # optional max % growth vs --baseline
+  #   ff_bits: 10
+  #   gate_depth: 10

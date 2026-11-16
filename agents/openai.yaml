@@ -1,0 +1,4 @@
+interface:
+  display_name: "Digital IC Suite"
+  short_description: "RTL-to-GDS digital IC front-end design, adaptive local lint/QoR/formal checks, and commercial EDA signoff."
+  default_prompt: "Use $digital-ic-suite to design, verify, or optimize synthesizable Verilog/SystemVerilog RTL through its adaptive local lint/QoR/formal inner loop and commercial EDA signoff outer loop."

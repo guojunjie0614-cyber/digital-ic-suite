@@ -1,0 +1,18 @@
+design: tiny_alu_pipe
+
+resources:
+  stage1_mul:
+    operation: multiply
+    expected: 1
+    a_width: 8
+    b_width: 8
+  stage2_add:
+    operation: add_sub
+    expected: 1
+
+limits:
+  latch_bits_max: 0
+  comb_loops_max: 0
+  stuck_output_bits_max: 0
+  undriven_output_bits_max: 0
+  gate_depth_max: 30

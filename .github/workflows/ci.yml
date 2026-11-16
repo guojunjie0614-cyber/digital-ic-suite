@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install open-source RTL toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yosys verilator iverilog tcsh
+
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip -r requirements.txt
+
+      - name: Run unit and integration test suite
+        run: python -B -m unittest discover -s tests -v
+
+      - name: Run tiny_alu_pipe example pre-synthesis QoR check
+        run: |
+          python rtl_check/scripts/pre_synth_check.py \
+            --top tiny_alu_pipe \
+            -f examples/tiny_alu_pipe/rtl.f \
+            --budget examples/tiny_alu_pipe/qor_budget.yaml \
+            --out-dir /tmp/tiny_alu_check

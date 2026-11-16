@@ -1,0 +1,69 @@
+# Example remote commercial EDA environment configuration.
+# Copy to ~/.config/digital-ic-suite/tools.yaml (or ./.eda_tools.yaml in a project)
+# and fill in your server SSH alias, license server, and tool installation paths.
+schema_version: 3
+default_target: eda-main
+
+targets:
+  eda-main:
+    transport: ssh
+    host: eda-server              # SSH host or ~/.ssh/config alias
+    ssh_args: ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
+    remote_home: /home/designer
+    run_root: /home/designer/eda-runs
+    locale: en_US.UTF-8
+
+  # Optional jump-host or custom connector script example:
+  # eda-jump:
+  #   transport: command
+  #   command: ["/path/to/custom_ssh_wrapper.sh", "--cmd"]
+  #   remote_home: /home/designer
+  #   run_root: /home/designer/eda-runs
+  #   locale: en_US.UTF-8
+
+profiles:
+  synopsys:
+    expected_env:
+      SNPSLMD_LICENSE_FILE: 27000@lic-server.example.internal
+    license:
+      kind: flexlm_env
+      variable: SNPSLMD_LICENSE_FILE
+
+tools:
+  syn-dc:
+    profile: synopsys
+    root: "/opt/eda/synopsys/syn/current"
+    bin: "/opt/eda/synopsys/syn/current/bin/dc_shell-xg-t"
+    probe: 'timeout 20 "$EDA_TOOL_BIN" -64bit -x "quit" </dev/null'
+
+  syn-pt:
+    profile: synopsys
+    root: "/opt/eda/synopsys/pts/current"
+    bin: "/opt/eda/synopsys/pts/current/bin/pt_shell"
+    probe: 'timeout 30 "$EDA_TOOL_BIN" -x "quit" </dev/null'
+
+  syn-fm:
+    profile: synopsys
+    root: "/opt/eda/synopsys/fm/current"
+    bin: "/opt/eda/synopsys/fm/current/bin/fm_shell"
+    probe: 'timeout 20 "$EDA_TOOL_BIN" -64bit -x "quit" </dev/null'
+
+  syn-vcs:
+    profile: synopsys
+    root: "/opt/eda/synopsys/vcs/current"
+    bin: "/opt/eda/synopsys/vcs/current/bin/vcs"
+    probe: 'timeout 20 "$EDA_TOOL_BIN" -ID'
+    expected_env:
+      VCS_HOME: /opt/eda/synopsys/vcs/current
+      VCS_TARGET_ARCH: linux64
+    path_prepend:
+      PATH:
+        - /opt/eda/synopsys/vcs/current/bin
+        - /opt/eda/synopsys/vcs/current/linux64/bin
+    smoke: "set -e; d=$EDA_RUN_ROOT/.doctor-vcs-$$; mkdir -p \"$d\"; trap \"rm -rf $d\" EXIT; printf '%s\\n' 'module t; initial begin $display(\"EDA_VCS_SMOKE_PASS\"); $finish; end endmodule' > \"$d/t.v\"; cd \"$d\"; timeout 60 \"$EDA_TOOL_BIN\" -full64 t.v -o simv >/dev/null 2>&1; ./simv 2>&1 | grep -q EDA_VCS_SMOKE_PASS"
+
+  syn-spyglass:
+    profile: synopsys
+    root: "/opt/eda/synopsys/spyglass/current/SPYGLASS_HOME"
+    bin: "/opt/eda/synopsys/spyglass/current/SPYGLASS_HOME/bin/spyglass"
+    probe: 'timeout 20 "$EDA_TOOL_BIN" -version'
