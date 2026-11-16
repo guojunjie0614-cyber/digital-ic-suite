@@ -18,9 +18,11 @@ Guarantees:
   * Infrastructure failures (SSH unreachable, auth refused) exit with rc=20.
 
 Examples:
+  eda_setup.py status
   eda_setup.py init --host user@eda-server --default
   eda_setup.py init --target lab --host eda-alias --port 2222 --jump user@bastion
   eda_setup.py init --target lab --host eda-alias --license synopsys=27000@lic-host --force
+  eda_setup.py skip --reason "no server access yet"
   eda_setup.py list
   eda_setup.py remove --target lab
 """
@@ -47,6 +49,8 @@ from eda_env import (  # noqa: E402
     config_exists,
     dropin_dir,
     load,
+    onboarding_marker,
+    onboarding_status,
     require_yaml,
     target as resolve_target,
     wrap_remote_bash,
@@ -455,6 +459,9 @@ def cmd_init(args: argparse.Namespace) -> int:
         raise
 
     summary["main_config_backup"] = str(backup) if backup else None
+    marker = onboarding_marker(None if args.project else main_path)
+    if marker.is_file():
+        marker.unlink()
     if args.json:
         print(json.dumps(summary, indent=2))
     else:
@@ -526,6 +533,39 @@ def cmd_remove(args: argparse.Namespace) -> int:
     return RC_OK
 
 
+def _explicit_main(args: argparse.Namespace) -> Path | None:
+    return Path(args.config).expanduser() if getattr(args, "config", None) else None
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    state = onboarding_status(_explicit_main(args))
+    if args.json:
+        print(json.dumps(state, indent=2))
+    elif state["status"] == "configured":
+        print(f"EDA ONBOARDING: configured ({', '.join(state['targets'])}) in {state['config_path']}")
+    elif state["status"] == "local-only":
+        print(f"EDA ONBOARDING: local-only (user declined a server; {state['marker']})")
+    elif state["status"] == "error":
+        print(f"EDA ONBOARDING: config error in {state['config_path']}: {state['error']}")
+    else:
+        print("EDA ONBOARDING: pending - ask the user for the EDA server SSH address, then run "
+              "`eda_setup.py init --host <user@host> --default` (or `eda_setup.py skip` for local-only use)")
+    return RC_OK
+
+
+def cmd_skip(args: argparse.Namespace) -> int:
+    marker = onboarding_marker(_explicit_main(args))
+    stamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    reason = (args.reason or "user has no EDA server or wants local-only tools").replace("\n", " ")
+    write_private(marker, (
+        "# digital-ic-suite: the user chose local-only use, so first-run onboarding stops asking.\n"
+        "# Delete this file, or run `eda_setup.py init --host <user@host>`, to connect a server later.\n"
+        f"status: local-only\ndate: {json.dumps(stamp)}\nreason: {json.dumps(reason)}\n"
+    ))
+    print(f"EDA ONBOARDING: local-only recorded in {marker}. Run `eda_setup.py init --host <user@host>` any time to connect a server.")
+    return RC_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--config", help="main config path (default: $EDA_TOOLS_CONFIG or ~/.config/digital-ic-suite/tools.yaml)")
@@ -565,6 +605,14 @@ def build_parser() -> argparse.ArgumentParser:
     rm = sub.add_parser("remove", parents=[common], help="forget an onboarded server")
     rm.add_argument("--target", required=True)
     rm.set_defaults(func=cmd_remove)
+
+    st = sub.add_parser("status", parents=[common], help="first-run state: configured | local-only | pending")
+    st.add_argument("--json", action="store_true")
+    st.set_defaults(func=cmd_status)
+
+    sk = sub.add_parser("skip", parents=[common], help="record that the user wants local-only use (stop asking)")
+    sk.add_argument("--reason", help="short note, e.g. 'no server access yet'")
+    sk.set_defaults(func=cmd_skip)
     return parser
 
 

@@ -171,6 +171,49 @@ class EdaSetupTests(unittest.TestCase):
             self.assertEqual(rm.returncode, 0, rm.stdout + rm.stderr)
             self.assertFalse((root / "tools.d" / "lab.yaml").exists())
 
+    def test_first_run_asks_until_configured_or_declined(self) -> None:
+        probe = ROOT / "rtl_check" / "scripts" / "probe_toolchain.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "cfg" / "tools.yaml"
+            env = {**os.environ, "EDA_TOOLS_CONFIG": str(main)}
+
+            def probe_run(*extra: str) -> subprocess.CompletedProcess:
+                return subprocess.run([sys.executable, str(probe), *extra], text=True,
+                                      capture_output=True, env=env, cwd=root)
+
+            def status() -> str:
+                r = subprocess.run([sys.executable, str(SETUP), "status", "--json"], text=True,
+                                   capture_output=True, env=env, cwd=root)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                return json.loads(r.stdout)["status"]
+
+            # Brand-new machine: the probe must tell the agent to ask for the server first.
+            self.assertEqual(status(), "pending")
+            first = probe_run()
+            self.assertIn("FIRST RUN", first.stdout)
+            self.assertIn("AGENT ACTION REQUIRED", first.stdout)
+            self.assertIn("Onboarding     : pending", first.stdout)
+            self.assertEqual(json.loads(probe_run("--json").stdout)["onboarding"]["status"], "pending")
+
+            # User has no server: recorded once, later sessions stop asking.
+            skip = subprocess.run([sys.executable, str(SETUP), "skip", "--reason", "no server yet"],
+                                  text=True, capture_output=True, env=env, cwd=root)
+            self.assertEqual(skip.returncode, 0, skip.stderr)
+            marker = root / "cfg" / "onboarding.yaml"
+            self.assertEqual(stat.S_IMODE(marker.stat().st_mode), 0o600)
+            self.assertEqual(status(), "local-only")
+            self.assertNotIn("FIRST RUN", probe_run().stdout)
+
+            # Connecting a server later switches to configured and clears the marker.
+            connector, eda, _ = fake_server(root)
+            init = subprocess.run([sys.executable, str(SETUP), "init", "--target", "lab", "--command", connector,
+                                   "--search-root", str(eda)], text=True, capture_output=True, env=env, cwd=root)
+            self.assertEqual(init.returncode, 0, init.stdout + init.stderr)
+            self.assertFalse(marker.exists())
+            self.assertEqual(status(), "configured")
+            self.assertNotIn("FIRST RUN", probe_run().stdout)
+
     def test_ssh_transport_flags_and_input_validation(self) -> None:
         parser = eda_setup.build_parser()
         args = parser.parse_args(["init", "--host", "eda-box", "--user", "designer", "--port", "2222",

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -89,6 +90,19 @@ def _probe_remote_config() -> dict:
         }
 
 
+def _probe_onboarding() -> dict:
+    """First-run state from eda_env: configured | local-only | pending | error."""
+    if not EDA_RUNNER_SCRIPTS.is_dir():
+        return {"status": "unknown"}
+    sys.path.insert(0, str(EDA_RUNNER_SCRIPTS))
+    try:
+        import eda_env  # type: ignore
+
+        return eda_env.onboarding_status()
+    except Exception as exc:  # never let the probe crash on config problems
+        return {"status": "error", "error": str(exc)}
+
+
 def recommend_strategy(local: dict, py_pkgs: dict, remote: dict) -> dict[str, str]:
     has = lambda k: bool(local.get(k, {}).get("available"))
     has_py = lambda k: bool(py_pkgs.get(k, {}).get("available"))
@@ -169,6 +183,7 @@ def collect_inventory() -> dict:
     }
     remote = _probe_remote_config()
     return {
+        "onboarding": _probe_onboarding(),
         "local_tools": local,
         "python_packages": py_pkgs,
         "commercial_eda": remote,
@@ -176,8 +191,29 @@ def collect_inventory() -> dict:
     }
 
 
+def print_onboarding(state: dict) -> None:
+    status = state.get("status")
+    setup = shlex.quote(str(EDA_RUNNER_SCRIPTS / "eda_setup.py"))
+    if status == "pending":
+        print("!! FIRST RUN: no EDA server is saved yet and the user has not declined one.")
+        print("!! AGENT ACTION REQUIRED before starting the task: ask the user for the EDA server")
+        print("!!   - SSH address (user@host or ~/.ssh/config alias), port if not 22, jump host if any")
+        print("!!   - a short name for the server; optional license server (port@host)")
+        print("!! Then run:")
+        print(f"!!   python3 {setup} init --target <name> --host <user@host> [--port N] [--jump user@bastion] --default")
+        print("!! If the user has no server or wants local tools only, record it so later sessions do not ask:")
+        print(f"!!   python3 {setup} skip --reason \"<why>\"")
+        print("!! Never ask for or store passwords; key-based SSH only.")
+        print()
+    elif status == "error":
+        print(f"!! EDA config error ({state.get('config_path', '?')}): {state.get('error')}")
+        print()
+
+
 def print_human(inv: dict) -> None:
     print("=== Digital IC Suite: Toolchain Inventory ===")
+    print_onboarding(inv.get("onboarding") or {})
+    print(f"Onboarding     : {(inv.get('onboarding') or {}).get('status', 'unknown')}")
     avail = [name for name, info in inv["local_tools"].items() if info["available"]]
     missing = [name for name, info in inv["local_tools"].items() if not info["available"]]
     py_avail = [
@@ -197,7 +233,7 @@ def print_human(inv: dict) -> None:
         )
     else:
         print("Commercial EDA : not configured "
-              f"(onboard a server: python3 {EDA_RUNNER_SCRIPTS / 'eda_setup.py'} init --host <user@host>)")
+              f"(onboard a server: python3 {shlex.quote(str(EDA_RUNNER_SCRIPTS / 'eda_setup.py'))} init --host <user@host>)")
     print("\nRecommended Execution Paths:")
     for k, v in inv["recommended_strategy"].items():
         print(f"  - {k:<17}: {v}")

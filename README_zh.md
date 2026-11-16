@@ -123,9 +123,11 @@ QoR Budget Check: PASS (7 rules)
 
 ## 商业 EDA 签核配置（`eda_runner/`）
 
-### 第一次使用：让 Agent 帮你接入服务器
+### 第一次使用：Agent 会先问你服务器地址
 
-直接告诉 Agent 服务器的 SSH 地址（例如“连 `designer@eda-server`，端口 2222，经跳板机 `designer@bastion`”），它会替你运行初始化向导；也可以自己运行：
+在一台还没保存过服务器的机器上第一次使用时，Agent 会在开始干活前先问你 EDA 服务器的 SSH 地址（探测结果显示 `Onboarding : pending`）。你回答类似“连 `designer@eda-server`，端口 2222，经跳板机 `designer@bastion`”即可；如果没有服务器，直接说不用，Agent 会用 `eda_setup.py skip` 记下来，之后不再追问。随时可用 `eda_setup.py status` 查看当前状态。
+
+随后 Agent 会替你运行初始化向导；也可以自己运行：
 
 ```bash
 python3 eda_runner/scripts/eda_setup.py init --target lab \

@@ -5,8 +5,9 @@ description: >
   timing-clean synthesizable Verilog/SystemVerilog RTL, bit-accurate testbenches,
   SVA/formal, CDC/RDC, adaptive local lint & Yosys elaboration/QoR checks,
   Synopsys DC/PT synthesis/STA, SDC constraints, low-power/DFT readiness, LEC,
-  and commercial EDA runner flows. Use for RTL design, review, verification,
-  synthesis/timing debug, constraints, or EDA flows.
+  and commercial EDA runner flows. On first use it asks for the user's EDA server
+  SSH address and saves it locally to drive remote EDA tools. Use for RTL design,
+  review, verification, synthesis/timing debug, constraints, or EDA flows.
 ---
 
 # Digital IC Suite
@@ -14,6 +15,56 @@ description: >
 Build front-end RTL that synthesizes cleanly and closes timing by construction,
 verified through an **environment-adaptive local inner loop** before touching heavy
 commercial signoff.
+
+`<suite>` below is the directory containing this `SKILL.md` (resolve relative to this file across Codex, Claude Code, Antigravity, Cursor, or project-local installs).
+
+## First Use: Ask for the EDA Server Before Anything Else
+
+At the start of every session using this skill, run the probe **before doing any
+task work** and read its `Onboarding` line:
+
+```bash
+python3 "<suite>/rtl_check/scripts/probe_toolchain.py"
+```
+
+- **`pending`** (first use: no EDA server saved and the user never declined one):
+  your **first reply must ask the user for their EDA server**, even if the current
+  task only needs local tools. Do not skip this, defer it, or decide on the user's
+  behalf that a server is unnecessary. Ask once, in one message, together with any
+  task clarification:
+  - SSH address (`user@host` or a `~/.ssh/config` alias), port if not 22, jump host if any;
+  - a short name for the server; optionally the license server (`port@host`) and
+    non-standard install directories;
+  - or tell you they have no server / want local-only tools.
+
+  **Never ask for or store passwords**: login is key-based. For a password-only
+  server, ask the user to run `ssh-copy-id <host>` themselves first.
+  - Address given → run the onboarding wizard (below), report its summary, then continue the task.
+  - No server / local only → record it so later sessions stop asking, then continue:
+    `python3 "<suite>/eda_runner/scripts/eda_setup.py" skip --reason "<user's words>"`
+- **`configured`**: use the targets listed under `Commercial EDA`; do not ask again.
+- **`local-only`**: do not ask. Offer onboarding only when a task truly needs a
+  commercial tool, or when the user asks to connect a server.
+- **`error`**: show the printed config error to the user and ask how to fix it.
+
+**Onboarding wizard** (also used later to add more servers):
+
+```bash
+python3 "<suite>/eda_runner/scripts/eda_setup.py" init --target <name> \
+  --host <user@host> [--port N] [--jump user@bastion] [--add-search-root /dir] --default
+```
+
+It verifies non-interactive SSH, reads the remote login environment (license
+variables, `PATH`), searches standard install roots for DC/PT/FM/LC/VCS/Verdi/
+SpyGlass/Xcelium/Genus/Innovus/Questa, and saves
+`~/.config/digital-ic-suite/tools.d/<name>.yaml` (mode 600). A hand-written
+`tools.yaml` is never rewritten; only its `default_target:` line changes (backup first).
+Ask a follow-up only when a license was not found or several installed versions
+compete; then rerun with `--license synopsys=27000@lic-host`,
+`--tool syn-dc=/path/bin/dc_shell`, and `--force`. Before the first real job run
+`python3 "<suite>/eda_runner/scripts/eda_preflight.py" <tool> --target <name> --level probe`.
+`eda_setup.py status | list | remove --target <name>` inspect or forget servers.
+`rc=20` from the wizard means SSH/auth is blocked: report the printed guidance and stop.
 
 ## Four Core Laws
 
@@ -38,46 +89,12 @@ commercial signoff.
 
 ## Adaptive Execution Loop (Probe First, Use Fastest Available Path)
 
-`<suite>` below is the directory containing this `SKILL.md` (resolve relative to this file across Codex, Claude Code, Antigravity, Cursor, or project-local installs).
-
-### Step 0: Probe Available Toolchains (Always Run First on a New Machine/Project)
+### Step 0: Use the Probe Result (Always First on a New Machine/Project)
 
 Never assume optional local tools (`verilator`, `sv2v`, `verible-verilog-lint`, `sby`,
-`cocotb`, `iverilog`) or commercial licenses exist. Probe first so you accelerate with
-whatever is installed and degrade gracefully when something is missing:
-
-```bash
-python3 "<suite>/rtl_check/scripts/probe_toolchain.py"
-```
-
-### Step 0b: First-Run EDA Server Onboarding (When Commercial Tools Are Needed)
-
-Trigger when the probe prints `Commercial EDA : not configured`, the needed tool or
-server is missing from the listed targets, or the user asks to connect a server.
-
-1. **Ask once, in one message**, for: the SSH address (`user@host` or a
-   `~/.ssh/config` alias), the port if not 22, a jump host if any, and a short name
-   for the server. Optionally: license server (`port@host`) and non-standard install
-   directories. **Never ask for or store passwords**: login must be key-based. For a
-   password-only server, ask the user to run `ssh-copy-id <host>` themselves first.
-2. **Run the onboarding wizard** with the answers:
-   ```bash
-   python3 "<suite>/eda_runner/scripts/eda_setup.py" init --target <name> \
-     --host <user@host> [--port N] [--jump user@bastion] [--add-search-root /dir] --default
-   ```
-   It verifies non-interactive SSH, reads the remote login environment (license
-   variables, `PATH`), searches standard install roots for DC/PT/FM/LC/VCS/Verdi/
-   SpyGlass/Xcelium/Genus/Innovus/Questa, and saves
-   `~/.config/digital-ic-suite/tools.d/<name>.yaml` (mode 600). A hand-written
-   `tools.yaml` is never rewritten; only its `default_target:` line changes (backup first).
-3. **Report the summary** to the user. Ask a follow-up only when a license was not
-   found or several installed versions compete; then rerun with
-   `--license synopsys=27000@lic-host`, `--tool syn-dc=/path/bin/dc_shell`, and `--force`.
-4. **Verify** before the first real job:
-   `python3 "<suite>/eda_runner/scripts/eda_preflight.py" <tool> --target <name> --level probe`.
-   `eda_setup.py list` shows configured servers; `eda_setup.py remove --target <name>` forgets one.
-
-`rc=20` from the wizard means SSH/auth is blocked: report the printed guidance and stop.
+`cocotb`, `iverilog`) or commercial licenses exist. The probe from **First Use** above
+lists what is installed and recommends the fastest path; accelerate with whatever is
+present and degrade gracefully when something is missing.
 
 ### 1. Adaptive Local Inner Loop (Run on Every Meaningful RTL Edit)
 
@@ -121,7 +138,7 @@ SpyGlass CDC, VCS/Verdi debug, or Formality LEC is needed.
 - Server targets, SSH aliases, licenses, and vendor paths live **outside** this skill
   in `~/.config/digital-ic-suite/tools.yaml` plus onboarded servers in
   `~/.config/digital-ic-suite/tools.d/` (or project `./.eda_tools.yaml`). Create them
-  with Step 0b; the schema is shown in `templates/eda_tools.example.yaml`.
+  with the First Use wizard; the schema is shown in `templates/eda_tools.example.yaml`.
 - Execute in a single-SSH-session preflight + job flow:
   ```bash
   EDA_SCRIPTS="<suite>/eda_runner/scripts"
@@ -163,4 +180,4 @@ Read the matching reference before non-trivial work in that area:
 | Microarchitecture trade-offs, cycle/II scheduling, fixed-point quantization/saturation, Foundry SRAM wrapper, QoR budgets | [`references/microarch-datapath-sram.md`](references/microarch-datapath-sram.md), [`templates/qor_budget.yaml`](templates/qor_budget.yaml) |
 | Clocks/resets, CDC/RDC mechanisms, SpyGlass 7-step triage & waivers, SDC authoring, 4-layer PPA triage, DC & Formality LEC templates | [`references/cdc-sta-lec-signoff.md`](references/cdc-sta-lec-signoff.md), [`templates/syn_dc.tcl`](templates/syn_dc.tcl), [`templates/lec_fm.tcl`](templates/lec_fm.tcl) |
 | Adaptive verification (`Verilator`/`iverilog`/`cocotb`), `sby` & `yosys-smtbmc` formal proofs, coverage, X-prop, Handoff/ECO gates | [`references/dv-and-formal.md`](references/dv-and-formal.md) |
-| Connecting a new EDA server (Step 0b wizard), per-server tool/license overrides, config schema (`ssh` vs. helper command targets, FlexLM/file licenses) | `eda_runner/scripts/eda_setup.py --help`, [`templates/eda_tools.example.yaml`](templates/eda_tools.example.yaml) |
+| Connecting a new EDA server (First Use wizard), per-server tool/license overrides, config schema (`ssh` vs. helper command targets, FlexLM/file licenses) | `eda_runner/scripts/eda_setup.py --help`, [`templates/eda_tools.example.yaml`](templates/eda_tools.example.yaml) |

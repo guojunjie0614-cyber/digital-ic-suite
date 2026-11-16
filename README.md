@@ -123,9 +123,11 @@ Re-running the same command after modifying the RTL automatically prints a `Prev
 
 ## Commercial EDA Signoff Configuration (`eda_runner/`)
 
-### First run: let the agent onboard your server
+### First run: the agent asks for your server
 
-Tell the agent your server's SSH address (for example "connect `designer@eda-server`, port 2222, via `designer@bastion`"). It runs the onboarding wizard for you; you can also run it yourself:
+The first time the skill is used on a machine with no saved server, the agent asks for your EDA server's SSH address before starting the task (the probe reports `Onboarding : pending`). Answer with something like "connect `designer@eda-server`, port 2222, via `designer@bastion`", or say you have no server; that choice is recorded with `eda_setup.py skip` so later sessions do not ask again. Check the state any time with `eda_setup.py status`.
+
+The agent then runs the onboarding wizard for you; you can also run it yourself:
 
 ```bash
 python3 eda_runner/scripts/eda_setup.py init --target lab \

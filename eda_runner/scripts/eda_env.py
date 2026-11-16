@@ -72,6 +72,37 @@ def require_yaml():
         ) from exc
 
 
+def onboarding_marker(main: Path | None = None) -> Path:
+    """File recording that the user chose local-only use (so first-run onboarding stops asking)."""
+    if main is None:
+        env_cfg = os.environ.get("EDA_TOOLS_CONFIG")
+        main = Path(env_cfg).expanduser() if env_cfg else DEFAULT_CONFIG
+    return main.parent / "onboarding.yaml"
+
+
+def onboarding_status(main: Path | None = None) -> dict:
+    """First-run state: configured | local-only | pending | error.
+
+    pending means no EDA server is saved and the user never declined: the agent
+    must ask for the server address before starting work.
+    """
+    try:
+        path = resolve_config_path(main)
+    except ConfigError:
+        path = None
+    if path is not None:
+        try:
+            data = load(path, allow_empty=True)
+        except ConfigError as exc:
+            return {"status": "error", "config_path": str(path), "error": str(exc)}
+        if data["targets"]:
+            return {"status": "configured", "config_path": str(path), "targets": sorted(data["targets"])}
+    marker = onboarding_marker(main)
+    if marker.is_file():
+        return {"status": "local-only", "marker": str(marker)}
+    return {"status": "pending", "marker": str(marker)}
+
+
 def wrap_remote_bash(script: str) -> str:
     """Wrap a bash script so remote tcsh/csh/zsh/dash login shells execute cleanly while preserving stdin."""
     b64 = base64.b64encode(script.encode("utf-8")).decode("ascii")
